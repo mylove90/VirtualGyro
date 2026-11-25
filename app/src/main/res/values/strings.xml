@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Virtual Gyro</string>
+    <string name="xposed_description">Gives apps without a gyroscope a virtual gyroscope and rotation vector built from the accelerometer and magnetometer (for GCam Photo Sphere).</string>
+</resources>

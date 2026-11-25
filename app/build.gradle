@@ -1,0 +1,32 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'io.github.virtualgyro'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'io.github.virtualgyro'
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName '0.1.0'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    // Xposed API stubs: compile-time only, the framework (LSPosed/Vector) provides the real classes at runtime.
+    compileOnly project(':xposed-stub')
+}
