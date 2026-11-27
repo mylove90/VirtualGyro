@@ -13,4 +13,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = 'VirtualGyro'
-include ':app', ':xposed-stub'
+include ':app'

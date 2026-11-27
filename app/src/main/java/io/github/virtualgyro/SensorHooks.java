@@ -1,190 +1,161 @@
 package io.github.virtualgyro;
 
+import android.app.Application;
+import android.content.pm.PackageManager;
 import android.hardware.Sensor;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.os.Handler;
 
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-import de.robv.android.xposed.XC_MethodHook;
-import de.robv.android.xposed.XposedBridge;
-import de.robv.android.xposed.XposedHelpers;
+import io.github.libxposed.api.XposedInterface;
+import io.github.libxposed.api.XposedModule;
 
-/** Hooks android.hardware.SensorManager inside the target app so missing gyro/rotation sensors appear. */
+/** Hooks SensorManager using the modern libxposed interceptor-chain API. */
 final class SensorHooks {
     private static boolean installed;
-    private static final Set<Integer> LOGGED = new HashSet<Integer>();
+    private static final Set<Integer> LOGGED = new HashSet<>();
 
-    private SensorHooks() {
-    }
+    private SensorHooks() {}
 
     private static synchronized void logOnce(int type, String what) {
         if (LOGGED.add(type)) {
-            XposedBridge.log("VirtualGyro: sensor type " + type + " requested: " + what);
+            VGLog.info("sensor type " + type + " requested: " + what);
         }
     }
 
     private static boolean hasType(List<Sensor> list, int type) {
-        for (Sensor s : list) {
-            if (s != null && s.getType() == type) {
-                return true;
-            }
+        for (Sensor sensor : list) {
+            if (sensor != null && sensor.getType() == type) return true;
         }
         return false;
     }
 
-    static synchronized void install(String pkg) {
-        if (installed) {
-            return;
+    private static void hookAll(XposedModule module, Class<?> owner, String name,
+                                XposedInterface.Hooker hooker) {
+        int count = 0;
+        for (Method method : owner.getDeclaredMethods()) {
+            if (method.getName().equals(name)) {
+                module.hook(method).intercept(hooker);
+                count++;
+            }
         }
+        if (count == 0) VGLog.info("No methods found for hook: " + owner.getName() + "." + name);
+    }
+
+    static synchronized void install(XposedModule module, String packageName) {
+        if (installed) return;
         installed = true;
-        XposedBridge.log("VirtualGyro: installing hooks in " + pkg);
+        VGLog.attach(module);
+        VGLog.info("Installing modern hooks in " + packageName);
 
         try {
-            XposedBridge.hookAllMethods(SensorManager.class, "getDefaultSensor", new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    if (param.args == null || param.args.length < 1 || !(param.args[0] instanceof Integer)) {
-                        return;
-                    }
-                    if (param.getResult() != null) {
-                        return;
-                    }
-                    int type = ((Integer) param.args[0]).intValue();
-                    if (FakeSensors.supports(type)) {
-                        Sensor fake = FakeSensors.get(type);
+            hookAll(module, SensorManager.class, "getDefaultSensor", chain -> {
+                Object result = chain.proceed();
+                if (result != null || chain.getArgs().isEmpty() || !(chain.getArg(0) instanceof Integer)) {
+                    return result;
+                }
+                int type = (Integer) chain.getArg(0);
+                if (!FakeSensors.supports(type)) {
+                    logOnce(type, "not available and not emulated");
+                    return null;
+                }
+                Sensor fake = FakeSensors.get(type);
+                if (fake != null) {
+                    logOnce(type, "provided a virtual sensor");
+                    return fake;
+                }
+                return null;
+            });
+        } catch (Throwable t) {
+            VGLog.error("getDefaultSensor hook failed", t);
+        }
+
+        try {
+            hookAll(module, SensorManager.class, "getSensorList", chain -> {
+                Object result = chain.proceed();
+                if (!(result instanceof List) || chain.getArgs().isEmpty()
+                        || !(chain.getArg(0) instanceof Integer)) return result;
+                int type = (Integer) chain.getArg(0);
+                int[] types;
+                if (type == Sensor.TYPE_ALL) {
+                    types = new int[]{FakeSensors.TYPE_GYROSCOPE, FakeSensors.TYPE_ROTATION_VECTOR,
+                            FakeSensors.TYPE_GAME_ROTATION_VECTOR, FakeSensors.TYPE_GYROSCOPE_UNCALIBRATED};
+                } else if (FakeSensors.supports(type)) {
+                    types = new int[]{type};
+                } else {
+                    return result;
+                }
+                @SuppressWarnings("unchecked") List<Sensor> original = (List<Sensor>) result;
+                ArrayList<Sensor> output = null;
+                for (int sensorType : types) {
+                    if (!hasType(original, sensorType)) {
+                        Sensor fake = FakeSensors.get(sensorType);
                         if (fake != null) {
-                            param.setResult(fake);
-                            logOnce(type, "provided a virtual sensor");
-                        }
-                    } else {
-                        logOnce(type, "not available and not emulated");
-                    }
-                }
-            });
-        } catch (Throwable t) {
-            XposedBridge.log("VirtualGyro: getDefaultSensor hook failed: " + t);
-        }
-
-        try {
-            XposedBridge.hookAllMethods(SensorManager.class, "getSensorList", new XC_MethodHook() {
-                @Override
-                @SuppressWarnings("unchecked")
-                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    if (param.args == null || param.args.length < 1 || !(param.args[0] instanceof Integer)) {
-                        return;
-                    }
-                    Object r = param.getResult();
-                    if (!(r instanceof List)) {
-                        return;
-                    }
-                    int type = ((Integer) param.args[0]).intValue();
-                    int[] types;
-                    if (type == Sensor.TYPE_ALL) {
-                        types = new int[]{FakeSensors.TYPE_GYROSCOPE, FakeSensors.TYPE_ROTATION_VECTOR,
-                                FakeSensors.TYPE_GAME_ROTATION_VECTOR, FakeSensors.TYPE_GYROSCOPE_UNCALIBRATED};
-                    } else if (FakeSensors.supports(type)) {
-                        types = new int[]{type};
-                    } else {
-                        return;
-                    }
-                    List<Sensor> orig = (List<Sensor>) r;
-                    ArrayList<Sensor> out = null;
-                    for (int t : types) {
-                        if (!hasType(orig, t)) {
-                            Sensor fake = FakeSensors.get(t);
-                            if (fake != null) {
-                                if (out == null) {
-                                    out = new ArrayList<Sensor>(orig);
-                                }
-                                out.add(fake);
-                            }
+                            if (output == null) output = new ArrayList<>(original);
+                            output.add(fake);
                         }
                     }
-                    if (out != null) {
-                        param.setResult(out);
-                    }
                 }
+                return output != null ? output : result;
             });
         } catch (Throwable t) {
-            XposedBridge.log("VirtualGyro: getSensorList hook failed: " + t);
+            VGLog.error("getSensorList hook failed", t);
         }
 
         try {
-            XposedBridge.hookAllMethods(SensorManager.class, "registerListener", new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                    Object[] a = param.args;
-                    if (a == null || a.length < 3 || !(a[0] instanceof SensorEventListener) || !(a[1] instanceof Sensor)) {
-                        return;
-                    }
-                    Sensor s = (Sensor) a[1];
-                    if (!FakeSensors.isFake(s)) {
-                        return;
-                    }
-                    Handler h = null;
-                    for (Object o : a) {
-                        if (o instanceof Handler) {
-                            h = (Handler) o;
-                        }
-                    }
-                    Engine.get((SensorManager) param.thisObject).add((SensorEventListener) a[0], s, h);
-                    param.setResult(Boolean.TRUE);
-                }
+            hookAll(module, SensorManager.class, "registerListener", chain -> {
+                List<Object> args = chain.getArgs();
+                if (args.size() < 3 || !(args.get(0) instanceof SensorEventListener)
+                        || !(args.get(1) instanceof Sensor)) return chain.proceed();
+                Sensor sensor = (Sensor) args.get(1);
+                if (!FakeSensors.isFake(sensor)) return chain.proceed();
+                Handler handler = null;
+                for (Object arg : args) if (arg instanceof Handler) handler = (Handler) arg;
+                Engine.get((SensorManager) chain.getThisObject())
+                        .add((SensorEventListener) args.get(0), sensor, handler);
+                return Boolean.TRUE;
             });
         } catch (Throwable t) {
-            XposedBridge.log("VirtualGyro: registerListener hook failed: " + t);
+            VGLog.error("registerListener hook failed", t);
         }
 
         try {
-            XposedBridge.hookAllMethods(SensorManager.class, "unregisterListener", new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                    Object[] a = param.args;
-                    if (a == null || a.length < 1 || !(a[0] instanceof SensorEventListener)) {
-                        return;
-                    }
-                    if (a[0] instanceof Engine) {
-                        return; // our own listener, normal path
-                    }
-                    Engine e = Engine.peek();
-                    if (e == null) {
-                        return;
-                    }
-                    Sensor s = (a.length >= 2 && a[1] instanceof Sensor) ? (Sensor) a[1] : null;
-                    if (s != null && !FakeSensors.isFake(s)) {
-                        return; // a real sensor, not ours
-                    }
-                    e.remove((SensorEventListener) a[0], s);
-                    if (s != null) {
-                        param.setResult(null); // only a fake sensor was named: skip the framework call
-                    }
-                }
+            hookAll(module, SensorManager.class, "unregisterListener", chain -> {
+                List<Object> args = chain.getArgs();
+                if (args.isEmpty() || !(args.get(0) instanceof SensorEventListener)
+                        || args.get(0) instanceof Engine) return chain.proceed();
+                Engine engine = Engine.peek();
+                if (engine == null) return chain.proceed();
+                Sensor sensor = args.size() >= 2 && args.get(1) instanceof Sensor
+                        ? (Sensor) args.get(1) : null;
+                if (sensor != null && !FakeSensors.isFake(sensor)) return chain.proceed();
+                engine.remove((SensorEventListener) args.get(0), sensor);
+                return sensor != null ? null : chain.proceed();
             });
         } catch (Throwable t) {
-            XposedBridge.log("VirtualGyro: unregisterListener hook failed: " + t);
+            VGLog.error("unregisterListener hook failed", t);
         }
 
-        // Some apps check the feature flag before they ever ask for the sensor.
+        // Some apps check the gyroscope feature flag before requesting a sensor.
         try {
-            Class<?> pm = XposedHelpers.findClass("android.app.ApplicationPackageManager", null);
-            XposedBridge.hookAllMethods(pm, "hasSystemFeature", new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    if (param.args != null && param.args.length >= 1
-                            && "android.hardware.sensor.gyroscope".equals(param.args[0])
-                            && Boolean.FALSE.equals(param.getResult())) {
-                        param.setResult(Boolean.TRUE);
-                        logOnce(-1, "hasSystemFeature(android.hardware.sensor.gyroscope) answered true");
-                    }
+            Class<?> pmClass = Class.forName("android.app.ApplicationPackageManager");
+            hookAll(module, pmClass, "hasSystemFeature", chain -> {
+                Object result = chain.proceed();
+                if (!Boolean.TRUE.equals(result) && !chain.getArgs().isEmpty()
+                        && "android.hardware.sensor.gyroscope".equals(chain.getArg(0))) {
+                    logOnce(-1, "hasSystemFeature(gyroscope) answered true");
+                    return Boolean.TRUE;
                 }
+                return result;
             });
         } catch (Throwable t) {
-            XposedBridge.log("VirtualGyro: hasSystemFeature hook failed: " + t);
+            VGLog.error("hasSystemFeature hook failed", t);
         }
     }
 }

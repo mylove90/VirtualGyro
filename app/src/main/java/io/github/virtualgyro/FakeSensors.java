@@ -7,7 +7,6 @@ import java.lang.reflect.Constructor;
 import java.util.HashMap;
 import java.util.Map;
 
-import de.robv.android.xposed.XposedBridge;
 
 /** Creates Sensor / SensorEvent objects through hidden constructors (works because the app process is hooked). */
 final class FakeSensors {
@@ -95,7 +94,7 @@ final class FakeSensors {
             CACHE.put(type, s);
             return s;
         } catch (Throwable t) {
-            XposedBridge.log("VirtualGyro: cannot create fake sensor type " + type + ": " + t);
+            VGLog.info("VirtualGyro: cannot create fake sensor type " + type + ": " + t);
             return null;
         }
     }
@@ -118,7 +117,7 @@ final class FakeSensors {
             c.setAccessible(true);
             return c.newInstance(Integer.valueOf(valueCount));
         } catch (Throwable t) {
-            XposedBridge.log("VirtualGyro: cannot create SensorEvent: " + t);
+            VGLog.info("VirtualGyro: cannot create SensorEvent: " + t);
             return null;
         }
     }

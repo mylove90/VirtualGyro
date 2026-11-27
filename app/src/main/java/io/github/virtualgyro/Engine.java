@@ -12,7 +12,6 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import de.robv.android.xposed.XposedBridge;
 
 /**
  * Listens to the real accelerometer + magnetometer and feeds the apps' listeners that registered
@@ -70,7 +69,7 @@ final class Engine implements SensorEventListener {
             }
         }
         clients.add(new Client(listener, sensor, handler));
-        XposedBridge.log("VirtualGyro: listener registered for fake sensor type " + sensor.getType());
+        VGLog.info("VirtualGyro: listener registered for fake sensor type " + sensor.getType());
         startIfNeeded();
     }
 
@@ -97,7 +96,7 @@ final class Engine implements SensorEventListener {
         if (accel == null || mag == null) {
             if (!unavailableLogged) {
                 unavailableLogged = true;
-                XposedBridge.log("VirtualGyro: accelerometer or magnetometer missing, cannot emulate");
+                VGLog.info("VirtualGyro: accelerometer or magnetometer missing, cannot emulate");
             }
             return;
         }
@@ -180,7 +179,7 @@ final class Engine implements SensorEventListener {
                     ev.sensor = c.sensor;
                     c.listener.onSensorChanged(ev);
                 } catch (Throwable t) {
-                    XposedBridge.log("VirtualGyro: delivery failed: " + t);
+                    VGLog.info("VirtualGyro: delivery failed: " + t);
                 } finally {
                     c.pending.decrementAndGet();
                 }

@@ -10,8 +10,8 @@ android {
         applicationId 'io.github.virtualgyro'
         minSdk 26
         targetSdk 34
-        versionCode 1
-        versionName '0.1.0'
+        versionCode 2
+        versionName '0.2.0-libxposed102'
     }
 
     buildTypes {
@@ -27,6 +27,6 @@ android {
 }
 
 dependencies {
-    // Xposed API stubs: compile-time only, the framework (LSPosed/Vector) provides the real classes at runtime.
-    compileOnly project(':xposed-stub')
+    // Compile-time API only; the installed Xposed framework provides it at runtime.
+    compileOnly 'io.github.libxposed:api:102.0.0'
 }

@@ -1,45 +1,59 @@
-# Virtual Gyro (LSPosed / Vector module)
+# Virtual Gyro — libxposed API 102
 
-Gives an app on a phone **without a gyroscope** (Galaxy A15 4G) a *virtual* gyroscope, gyroscope-uncalibrated,
-rotation-vector and game-rotation-vector sensor, built from the accelerometer + magnetometer.
-Made for GCam **Photo Sphere** (black screen: `SensorManager: sensor or listener is null`).
+Virtual Gyro emulates a gyroscope and rotation-vector sensors for apps that do not have a physical gyroscope. It estimates angular velocity and orientation from the device accelerometer and magnetometer, then delivers synthetic sensor events to registered listeners.
 
-* Only sensors the phone does **not** have are added. On a phone with a real gyroscope nothing changes.
-* Only apps in the module's scope are touched (default suggestion: `com.samsung.android.scan3d`).
-* Java-level hooks on `android.hardware.SensorManager` in the target app. Native (NDK) sensor access is not covered.
+This project has been migrated from the legacy Xposed API 93 (`de.robv.android.xposed`) to the modern **libxposed API 102** (`io.github.libxposed`). It no longer contains the legacy Xposed stub module or `assets/xposed_init` entry point.
 
-## Build (GitHub Actions)
+## Compatibility
 
-1. Create a new GitHub repository and upload everything in this folder, **including `.github/workflows/build.yml`**
-   (the web uploader may skip hidden folders: use `git push`, or create that file with *Add file -> Create new file* and the path `.github/workflows/build.yml`).
-2. Open the **Actions** tab -> *Build APK* (it also runs on every push; use *Run workflow* to start it by hand).
-3. When it is green, open the run and download the artifact **VirtualGyro-debug-apk** (contains `app-debug.apk`).
+- Requires an Xposed framework implementation with support for modern libxposed API 102 (or compatible API 102 support).
+- The module's default scope is `com.samsung.android.scan3d` (the Samsung 3D Scanner / GCam Photo Sphere package used during development). Change `app/src/main/resources/META-INF/xposed/scope.list` if you want a different target.
+- Hooks Java-level `android.hardware.SensorManager` calls. Native sensor access is not covered.
+- A derived gyroscope is an estimate, not a replacement for physical gyro hardware. It can lag and be disturbed by magnetic interference.
+
+## Build
+
+Requirements: JDK 17, Android SDK platform 34, and Gradle 8.7 or newer (the GitHub Actions workflow uses Gradle 8.9).
+
+```bash
+gradle --no-daemon assembleDebug
+```
+
+The APK is generated at `app/build/outputs/apk/debug/app-debug.apk`.
+
+## GitHub Actions
+
+Push the project to GitHub, then open **Actions → Build APK**. The workflow builds the debug APK and uploads it as the `VirtualGyro-debug-apk` artifact.
 
 ## Install / use
 
 1. Install `app-debug.apk`.
-2. LSPosed / Vector manager -> *Modules* -> enable **Virtual Gyro**, tick GCam's package in its scope
-   (`com.samsung.android.scan3d`, or the package name of the port you use).
-3. Force-stop GCam, open it, try Photo Sphere.
+2. In a modern-libxposed-compatible framework manager, enable **Virtual Gyro**.
+3. Ensure the target app is included in the module scope. The default scope is `com.samsung.android.scan3d`.
+4. Force-stop the target app and launch it again.
 
-## Check that it works
+## Diagnostics
 
-LSPosed/Vector manager -> *Logs* -> *Modules*, or:
+Check the framework's module log, or run:
 
-    su -c "logcat -d | grep -i virtualgyro"
+```sh
+su -c 'logcat -d | grep -i VirtualGyro'
+```
 
-Expected lines:
+Expected messages include:
 
-    VirtualGyro: installing hooks in com.samsung.android.scan3d
-    VirtualGyro: sensor type 4 requested: provided a virtual sensor
-    VirtualGyro: listener registered for fake sensor type 4
+```text
+VirtualGyro: Module loaded
+VirtualGyro: Installing modern hooks in com.samsung.android.scan3d
+VirtualGyro: sensor type 4 requested: provided a virtual sensor
+VirtualGyro: listener registered for fake sensor type 4
+```
 
-* `sensor type N requested: not available and not emulated` -> the app asked for a sensor this module does not provide. Tell me the number N.
-* No `VirtualGyro` lines at all -> the module is not enabled for that package, or the app was not force-stopped.
+If the app reports that a sensor type is not available and not emulated, note the sensor type number. If there are no module messages, check framework compatibility, module activation, scope, and whether the app was force-stopped.
 
-## Notes / limits
+## Implementation notes
 
-* A gyroscope derived from accelerometer + compass is noisy and lags a little (~0.1-0.25 s) and is disturbed by nearby metal/magnets.
-  Photo Sphere may stitch roughly or refuse; a real gyroscope cannot be replaced.
-* If GCam starts using the virtual gyro for HDR+ alignment and photo quality gets worse, remove GCam from the module's scope.
-* Tuning lives in `GyroEstimator` (`alphaGravity`, `alphaMagnetic`, `alphaOmega`, `deadband`).
+- `MainHook` is the modern `XposedModule` entry point.
+- Entry registration, scope, and API requirements are declared under `app/src/main/resources/META-INF/xposed/`.
+- Hooks use libxposed's interceptor-chain API; there are no legacy `XC_MethodHook`, `XposedBridge`, or `XposedHelpers` calls.
+- Sensor estimation and event delivery remain in `GyroEstimator`, `FusionMath`, `Engine`, and `FakeSensors`.
